@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wigglegram Maker</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Wigglegram</h1>
+      <p class="subtitle">Create fun 3D-style animated photos</p>
+    </header>
+
+    <main>
+      <!-- Upload Section -->
+      <section class="upload-section">
+        <div class="upload-box" id="leftBox">
+          <input type="file" id="leftInput" accept="image/*" hidden />
+          <div class="upload-content" id="leftContent">
+            <div class="upload-icon">📷</div>
+            <p>Left Image</p>
+            <span class="hint">Click or drop</span>
+          </div>
+          <img id="leftPreview" class="preview-img" hidden />
+        </div>
+
+        <div class="upload-box" id="rightBox">
+          <input type="file" id="rightInput" accept="image/*" hidden />
+          <div class="upload-content" id="rightContent">
+            <div class="upload-icon">📷</div>
+            <p>Right Image</p>
+            <span class="hint">Click or drop</span>
+          </div>
+          <img id="rightPreview" class="preview-img" hidden />
+        </div>
+      </section>
+
+      <!-- Alignment Controls -->
+      <section class="controls-section" id="alignSection" hidden>
+        <h2>Alignment</h2>
+        <p class="hint-text">Adjust the right image so the main subject overlaps perfectly</p>
+        
+        <div class="slider-group">
+          <label>Horizontal Offset <span id="offsetXValue">0</span>px</label>
+          <input type="range" id="offsetX" min="-150" max="150" value="0" />
+        </div>
+        
+        <div class="slider-group">
+          <label>Vertical Offset <span id="offsetYValue">0</span>px</label>
+          <input type="range" id="offsetY" min="-150" max="150" value="0" />
+        </div>
+      </section>
+
+      <!-- Preview Section -->
+      <section class="preview-section" id="previewSection" hidden>
+        <h2>Preview</h2>
+        <div class="canvas-container">
+          <canvas id="wiggleCanvas"></canvas>
+        </div>
+
+        <div class="playback-controls">
+          <div class="slider-group">
+            <label>Speed <span id="speedValue">120</span>ms</label>
+            <input type="range" id="speed" min="40" max="400" value="120" />
+          </div>
+
+          <div class="button-row">
+            <button id="playBtn" class="btn primary">Pause</button>
+            <button id="downloadBtn" class="btn secondary">Download GIF</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Status -->
+      <div id="status" class="status"></div>
+    </main>
+
+    <footer>
+      <p>Made with ❤️ · Open source on <a href="https://github.com/MalvinMakhuthe13/wigglegram_test" target="_blank">GitHub</a></p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
