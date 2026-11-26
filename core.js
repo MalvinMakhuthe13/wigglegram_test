@@ -331,6 +331,155 @@
     };
   }
 
+
+  // ---------- Multi-phone sync by sound ----------
+
+  /**
+   * Loudness envelope at `outRate` Hz with slow drift removed, so claps, whistles, kicks and
+   * crowd roars line up between phones even when one is louder than another.
+   */
+  function envelope(samples, sampleRate, outRate) {
+    outRate = outRate || 1000;
+    const step = sampleRate / outRate;
+    const n = Math.floor(samples.length / step);
+    const env = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const a = Math.floor(i * step);
+      const b = Math.min(samples.length, Math.floor((i + 1) * step));
+      let s = 0;
+      for (let j = a; j < b; j++) s += Math.abs(samples[j]);
+      env[i] = s / Math.max(1, b - a);
+    }
+    // Subtract a moving average (~0.25 s) and keep only rises: onsets match best.
+    const win = Math.max(3, Math.round(outRate * 0.25));
+    const out = new Float32Array(n);
+    let acc = 0;
+    for (let i = 0; i < n; i++) {
+      acc += env[i];
+      if (i >= win) acc -= env[i - win];
+      const avg = acc / Math.min(i + 1, win);
+      out[i] = Math.max(0, env[i] - avg);
+    }
+    return out;
+  }
+
+  /**
+   * Lag (in envelope samples) to add to a time in `b` so it matches the same moment in `a`:
+   * a[t] ≈ b[t - lag]. Normalised cross-correlation over ±maxLag, with sub-sample refinement.
+   */
+  function bestLag(a, b, maxLag, minOverlap) {
+    let best = -Infinity;
+    let bestL = 0;
+    const scores = new Map();
+    // A match on a tiny sliver of overlap is luck, not sync: demand real shared time.
+    const need = minOverlap != null ? minOverlap : Math.floor(Math.min(a.length, b.length) * 0.4);
+    for (let L = -maxLag; L <= maxLag; L++) {
+      if (Math.min(a.length, b.length + L) - Math.max(0, L) < need) continue;
+      let s = 0, ea = 0, eb = 0;
+      const i0 = Math.max(0, L);
+      const i1 = Math.min(a.length, b.length + L);
+      for (let i = i0; i < i1; i++) {
+        const x = a[i];
+        const y = b[i - L];
+        s += x * y;
+        ea += x * x;
+        eb += y * y;
+      }
+      const score = ea > 0 && eb > 0 ? s / Math.sqrt(ea * eb) : -Infinity;
+      scores.set(L, score);
+      if (score > best) {
+        best = score;
+        bestL = L;
+      }
+    }
+    const l = scores.get(bestL - 1);
+    const r = scores.get(bestL + 1);
+    let sub = 0;
+    if (Number.isFinite(l) && Number.isFinite(r)) {
+      const d = l - 2 * best + r;
+      if (d < 0) sub = Math.max(-0.5, Math.min(0.5, (0.5 * (l - r)) / d));
+    }
+    return { lag: bestL + sub, score: best };
+  }
+
+  // ---------- One-frame depth (Action mode) ----------
+
+  /**
+   * A depth map (0 far .. 1 near) from what we know about a single photo: people/objects mask
+   * (if the AI found any) are near, the ground gets nearer towards the bottom, the sky is far.
+   * Blurred so edges bend softly instead of tearing.
+   */
+  function makeDepth(mask, w, h, focus) {
+    const d = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const ground = 0.12 + 0.38 * Math.pow(y / (h - 1), 1.6);
+      for (let x = 0; x < w; x++) d[y * w + x] = ground;
+    }
+    if (mask) {
+      for (let i = 0; i < d.length; i++) if (mask[i]) d[i] = Math.max(d[i], 0.9);
+    } else if (focus) {
+      // No AI: assume the tapped subject stands out from its surroundings.
+      const rx = w * 0.18;
+      const ry = h * 0.3;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const e = ((x - focus.x) / rx) ** 2 + ((y - focus.y) / ry) ** 2;
+          if (e < 1) d[y * w + x] = Math.max(d[y * w + x], 0.5 + 0.4 * (1 - e));
+        }
+      }
+    }
+    return blur(d, w, h, Math.max(2, Math.round(Math.min(w, h) * 0.02)));
+  }
+
+  function blur(src, w, h, r) {
+    const tmp = new Float32Array(w * h);
+    const out = new Float32Array(w * h);
+    const span = 2 * r + 1;
+    for (let y = 0; y < h; y++) {
+      let acc = 0;
+      for (let x = -r; x <= r; x++) acc += src[y * w + Math.min(w - 1, Math.max(0, x))];
+      for (let x = 0; x < w; x++) {
+        tmp[y * w + x] = acc / span;
+        acc += src[y * w + Math.min(w - 1, x + r + 1)] - src[y * w + Math.max(0, x - r)];
+      }
+    }
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let y = -r; y <= r; y++) acc += tmp[Math.min(h - 1, Math.max(0, y)) * w + x];
+      for (let y = 0; y < h; y++) {
+        out[y * w + x] = acc / span;
+        acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
+      }
+    }
+    return out;
+  }
+
+  /**
+   * One new viewpoint: every pixel slides sideways in proportion to how much nearer or farther
+   * it is than the focus depth. `shift` is pixels of slide for a depth difference of 1.
+   * Backward sampling, so there are no holes.
+   */
+  function depthView(src, w, h, depth, shift, focusDepth) {
+    const out = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        let sx = x - shift * (depth[i] - focusDepth);
+        if (sx < 0) sx = 0;
+        if (sx > w - 1.001) sx = w - 1.001;
+        const x0 = Math.floor(sx);
+        const f = sx - x0;
+        const a = (y * w + x0) * 4;
+        const o = i * 4;
+        out[o] = src[a] * (1 - f) + src[a + 4] * f;
+        out[o + 1] = src[a + 1] * (1 - f) + src[a + 5] * f;
+        out[o + 2] = src[a + 2] * (1 - f) + src[a + 6] * f;
+        out[o + 3] = 255;
+      }
+    }
+    return out;
+  }
+
   /** Mean gradient (texture) inside a rect of a gradient image. */
   function textureIn(g, w, h, rect) {
     return meanIn(g, w, h, rect);
@@ -348,5 +497,6 @@
   return {
     grayFromRGBA, gradient, sharpness, estimateShift, selectViews, commonCrop, fitAspect, timeline, cumulative,
     fitSimilarity, applySim, invertSim, commonCropSim, meanIn, warpGray, composeSim, textureIn,
+    envelope, bestLag, makeDepth, depthView,
   };
 });

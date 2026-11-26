@@ -1,5 +1,5 @@
 // Offline shell: clubs and venues often have no signal.
-const CACHE = "wigglegram-v4";
+const CACHE = "wigglegram-v6";
 const SHELL = ["./", "index.html", "styles.css", "core.js", "app.js", "manifest.webmanifest", "icon.svg"];
 const CDN = ["https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js", "https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js", "https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js"];
 
@@ -22,7 +22,7 @@ self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  const cacheable = url.origin === location.origin || url.hostname === "cdn.jsdelivr.net";
+  const cacheable = url.origin === location.origin || url.hostname === "cdn.jsdelivr.net" || url.hostname === "storage.googleapis.com";
   if (!cacheable) return;
   // Network first for the app files so updates land; cache when offline.
   e.respondWith(
@@ -34,6 +34,7 @@ self.addEventListener("fetch", (e) => {
         }
         return res;
       })
-      .catch(() => caches.match(req).then((hit) => hit || caches.match("index.html"))),
+      // Offline: serve the cached copy; only page loads fall back to the app shell.
+      .catch(() => caches.match(req).then((hit) => hit || (req.mode === "navigate" ? caches.match("index.html") : Response.error()))),
   );
 });

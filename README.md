@@ -18,6 +18,14 @@ A 4-lens camera has a fixed, short gap between lenses and exactly 4 views. Wiggl
 - **Crisp frames by default**, like a lens camera. *Smooth* adds blended in-between frames if you prefer a softer turn.
 - **Film look** (optional): warm tone, moving grain and vignette.
 
+## Three ways to shoot
+
+| Mode | For | How |
+|---|---|---|
+| **Sweep** | People who can hold still for a second | Slide one phone sideways a hand-width. Most depth, best quality. |
+| **Action** | Sport, dancing, anything moving | **Hold** the shutter while the play happens; the last 3 s are kept at 15 fps. Scrub to the exact frame, and the 3D is built from that single instant: on-device AI finds the players and the scene is given depth around them, so the action is frozen sharp. Offline it falls back to depth estimated from the scene. |
+| **Multi-phone** | True 3D of moving action | 2–4 phones side by side all film the play (each one taps record in Multi-phone mode, or uses its own camera app). Import all the videos on one phone: they are lined up automatically **by sound** (crowd noise, whistles, kicks), you scrub to the moment, and the same instant is pulled from every phone. Each phone can be nudged by a frame if needed. Name the files left to right. |
+
 ## Event flow
 
 1. **Capture**: frame the guest, tap the shutter, then slide the phone after the countdown. In dark clubs, use 💡 to turn on the light (Android).

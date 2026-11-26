@@ -28,6 +28,7 @@
           <div class="guide-bar"><i id="guideFill"></i></div>
         </div>
         <div class="countdown" id="countdown" hidden></div>
+        <div class="rec" id="recBadge" hidden>● REC <span id="recTime">0.0</span>s</div>
         <div class="cam-off" id="camOff">
           <p>Tap <b>Start camera</b> to begin.</p>
           <p class="muted">Or import photos from a rig or another camera.</p>
@@ -38,10 +39,19 @@
         </div>
       </div>
 
+      <div class="seg modes" id="modeSeg">
+        <button data-mode="sweep" class="on">Sweep</button>
+        <button data-mode="action">Action</button>
+        <button data-mode="multi">Multi-phone</button>
+      </div>
       <div class="capture-bar">
-        <label class="ghost-btn file-btn">
+        <label class="ghost-btn file-btn" id="importLabel">
           Import
           <input type="file" id="importInput" accept="image/*" multiple hidden />
+        </label>
+        <label class="ghost-btn file-btn" id="videoLabel" hidden>
+          Import videos
+          <input type="file" id="videoInput" accept="video/*" multiple hidden />
         </label>
         <button class="shutter" id="shutterBtn" aria-label="Capture"><span></span></button>
         <button class="ghost-btn" id="camBtn">Start camera</button>
@@ -57,9 +67,20 @@
         <div class="busy" id="busy" hidden><span class="spinner"></span><b id="busyText">Working…</b></div>
         <div class="empty" id="editEmpty"><p>Nothing captured yet.</p><p class="muted">Shoot a sweep on the Capture tab, or import photos.</p></div>
       </div>
+      <div class="card moment" id="momentPanel" hidden>
+        <p class="moment-title" id="momentTitle">Pick the moment</p>
+        <input type="range" id="momentRange" min="0" max="0" step="1" value="0" />
+        <div class="row">
+          <button class="ghost-btn" id="momentPrev">◀ Frame</button>
+          <button class="ghost-btn" id="momentNext">Frame ▶</button>
+        </div>
+        <div id="nudges"></div>
+        <button class="primary-btn wide" id="momentUse">Make 3D from this moment</button>
+        <p class="muted" id="momentNote"></p>
+      </div>
       <p class="hint">Tap the person or thing that should stay still. Everything else moves around it.</p>
 
-      <div class="controls">
+      <div class="controls" id="editControls">
         <label>Depth <output id="depthOut"></output>
           <input type="range" id="depth" min="0.3" max="1" step="0.05" value="0.85" />
         </label>
@@ -81,7 +102,7 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="editActions">
         <button class="ghost-btn" id="retakeBtn">Retake</button>
         <button class="primary-btn" id="exportBtn">Make clip</button>
       </div>

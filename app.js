@@ -81,6 +81,9 @@
     step: 0,
     timer: null,
     clip: null, // { id, blob, mime, url, status, method, contact, delivered, createdAt, price, link }
+    mode: "sweep", // sweep | action | multi
+    moment: null, // { kind: "action", frames } | { kind: "multi", videos, lags, t0, t1 }
+    recorder: null,
   };
 
   // ---------- Navigation ----------
@@ -88,7 +91,7 @@
     document.querySelectorAll(".screen").forEach((el) => el.classList.toggle("active", el.id === "screen-" + name));
     document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.screen === name));
     if (name === "gallery") renderGallery();
-    $("editEmpty").hidden = st.views.length > 0;
+    $("editEmpty").hidden = st.views.length > 0 || !!st.moment;
     $("deliverEmpty").hidden = !!st.clip;
     $("deliverBody").hidden = !st.clip;
     if (name !== "edit") stopPlayback();
@@ -120,7 +123,7 @@
     }
     try {
       st.stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
+        audio: st.mode === "multi",
         video: {
           facingMode: { ideal: st.facing },
           // As sharp as the phone allows; 60 fps keeps sweep blur down where supported.
@@ -177,8 +180,31 @@
   });
 
   // ---------- Capture ----------
+  const HINTS = {
+    sweep: "Hold the shutter steady on your subject, then slide the phone sideways about a hand-width while it shoots.",
+    action: "For moving action: HOLD the shutter while the play happens (up to 3 s), let go, then pick the exact moment.",
+    multi: "Put 2–4 phones side by side, all filming the same play. Tap to record on each phone, then import all the videos here.",
+  };
+  function setMode(mode) {
+    if (st.recorder) return toast("Stop recording first.");
+    const had = !!st.stream;
+    const needAudio = mode === "multi" || st.mode === "multi";
+    st.mode = mode;
+    $("modeSeg").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
+    $("captureHint").textContent = HINTS[mode];
+    $("importLabel").hidden = mode === "multi";
+    $("videoLabel").hidden = mode !== "multi";
+    if (had && needAudio) startCamera();
+  }
+  $("modeSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (b) setMode(b.dataset.mode);
+  });
+
   let capturing = false;
   $("shutterBtn").addEventListener("click", async () => {
+    if (st.mode === "action") return; // action uses press-and-hold
+    if (st.mode === "multi") return toggleRecording();
     if (capturing) return;
     if (!st.stream) {
       await startCamera();
@@ -194,6 +220,407 @@
       $("shutterBtn").classList.remove("busy");
     }
   });
+
+  // Action mode: hold to keep shooting; the last 3 s are kept so the decisive moment is never missed.
+  let action = null;
+  $("shutterBtn").addEventListener("pointerdown", async (e) => {
+    if (st.mode !== "action" || action) return;
+    e.preventDefault();
+    // Keep the press even if the thumb drifts off the button; only lifting it stops.
+    try {
+      $("shutterBtn").setPointerCapture(e.pointerId);
+    } catch {
+      /* older browsers */
+    }
+    if (!st.stream) {
+      await startCamera();
+      if (!st.stream) return;
+    }
+    const video = $("video");
+    if (!video.videoWidth) return toast("The camera has no picture yet.");
+    const scale = Math.min(1, Math.min(S.longEdge, 1280) / Math.max(video.videoWidth, video.videoHeight));
+    const w = Math.round(video.videoWidth * scale);
+    const h = Math.round(video.videoHeight * scale);
+    const fps = 15;
+    const keep = 45; // 3 seconds
+    action = { frames: [], start: performance.now(), stop: false };
+    $("shutterBtn").classList.add("busy");
+    $("recBadge").hidden = false;
+    const pool = [];
+    let n = 0;
+    while (!action.stop && performance.now() - action.start < 8000) {
+      const c = pool.pop() || Object.assign(document.createElement("canvas"), { width: w, height: h });
+      c.getContext("2d").drawImage(video, 0, 0, w, h);
+      action.frames.push(c);
+      if (action.frames.length > keep) pool.push(action.frames.shift());
+      $("recTime").textContent = Math.min(3, (performance.now() - action.start) / 1000).toFixed(1);
+      // Keep a steady 15 fps: wait for the next slot on a fixed schedule, then the next camera frame.
+      n++;
+      const wait = action.start + (n * 1000) / fps - performance.now();
+      if (wait > 4) await sleep(wait - 2);
+      await nextVideoFrame(video);
+    }
+    const frames = action.frames;
+    action = null;
+    $("recBadge").hidden = true;
+    $("shutterBtn").classList.remove("busy");
+    if (frames.length) openMoment({ kind: "action", frames });
+  });
+  const stopAction = () => {
+    if (action) action.stop = true;
+  };
+  ["pointerup", "pointercancel"].forEach((ev) => $("shutterBtn").addEventListener(ev, stopAction));
+
+  // Multi-phone: this phone records a normal video with sound; sound is what lines the phones up.
+  async function toggleRecording() {
+    if (st.recorder) {
+      st.recorder.stop();
+      return;
+    }
+    if (!st.stream) {
+      await startCamera();
+      if (!st.stream) return;
+    }
+    if (!st.stream.getAudioTracks().length) toast("No microphone: the videos can't be lined up by sound.");
+    const mime = pickMime();
+    if (!mime) return toast("This phone can't record video in the browser. Use its camera app instead.");
+    const chunks = [];
+    const rec = new MediaRecorder(st.stream, { mimeType: mime, videoBitsPerSecond: 12_000_000 });
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    const started = performance.now();
+    const timer = setInterval(() => ($("recTime").textContent = ((performance.now() - started) / 1000).toFixed(1)), 100);
+    rec.onstop = () => {
+      clearInterval(timer);
+      st.recorder = null;
+      $("recBadge").hidden = true;
+      $("shutterBtn").classList.remove("busy");
+      const type = mime.split(";")[0];
+      const name = `${(S.eventName || "wigglegram").replace(/[^\w-]+/g, "-")}-cam-${new Date().toTimeString().slice(0, 8).replace(/:/g, "")}.${type === "video/mp4" ? "mp4" : "webm"}`;
+      const file = new File([new Blob(chunks, { type })], name, { type });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: "Wigglegram camera" }).catch(() => downloadFile(file));
+      } else downloadFile(file);
+      toast("Saved. Collect every phone's video on one phone, then Import videos.");
+    };
+    rec.start(500);
+    st.recorder = rec;
+    $("recBadge").hidden = false;
+    $("shutterBtn").classList.add("busy");
+  }
+  function downloadFile(file) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(file);
+    a.download = file.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }
+
+  $("videoInput").addEventListener("change", async (e) => {
+    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith("video/") || /\.(mp4|mov|webm|m4v)$/i.test(f.name));
+    e.target.value = "";
+    if (files.length < 2) return toast("Pick at least 2 videos, one per phone, left to right.");
+    files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    show("edit");
+    busy(true, "Lining the phones up by sound…");
+    try {
+      const videos = await Promise.all(files.map(loadVideo));
+      const envs = [];
+      for (const f of files) envs.push(await soundEnvelope(f));
+      const lags = [0];
+      let synced = !!envs[0];
+      for (let i = 1; i < files.length; i++) {
+        if (!envs[0] || !envs[i]) {
+          lags.push(0);
+          synced = false;
+          continue;
+        }
+        const r = WG.bestLag(envs[0], envs[i], Math.min(8000, Math.floor(Math.max(envs[0].length, envs[i].length) * 0.6)));
+        lags.push(r.lag / 1000); // seconds: time in video i = t0 - lag
+        if (r.score < 0.2) synced = false;
+      }
+      // The window where every phone was recording.
+      let t0 = 0;
+      const dur = (v) => (Number.isFinite(v.duration) ? v.duration : 60);
+      let t1 = dur(videos[0]);
+      videos.forEach((v, i) => {
+        t0 = Math.max(t0, lags[i]);
+        t1 = Math.min(t1, dur(v) + lags[i]);
+      });
+      if (!(t1 > t0)) throw new Error("The videos don't overlap in time.");
+      openMoment({ kind: "multi", videos, lags, t0, t1 });
+      $("momentNote").textContent = synced
+        ? `Lined up ${files.length} phones by sound.`
+        : "Couldn't line every phone up by sound (no audio?). Frames may be from slightly different moments.";
+    } catch (err) {
+      toast(err.message || "Those videos could not be opened.");
+    } finally {
+      busy(false);
+    }
+  });
+
+  function loadVideo(file) {
+    return new Promise((resolve, reject) => {
+      const v = document.createElement("video");
+      v.muted = true;
+      v.playsInline = true;
+      v.preload = "auto";
+      v.onerror = () => reject(new Error("Could not open " + file.name));
+      v.onloadedmetadata = () => {
+        if (Number.isFinite(v.duration)) return resolve(v);
+        // Browser-recorded WebM has no length in its header: seek to the end to learn it.
+        const done = () => {
+          if (!Number.isFinite(v.duration)) return;
+          v.removeEventListener("durationchange", done);
+          v.currentTime = 0;
+          resolve(v);
+        };
+        v.addEventListener("durationchange", done);
+        v.currentTime = 1e9;
+        setTimeout(() => resolve(v), 4000);
+      };
+      v.src = URL.createObjectURL(file);
+    });
+  }
+
+  async function soundEnvelope(file) {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new Ctx();
+      const buf = await ctx.decodeAudioData(await file.arrayBuffer());
+      const data = buf.getChannelData(0);
+      ctx.close && ctx.close();
+      return WG.envelope(data, buf.sampleRate, 1000);
+    } catch {
+      return null;
+    }
+  }
+
+  function seekTo(video, t) {
+    return new Promise((resolve) => {
+      const done = () => {
+        video.removeEventListener("seeked", done);
+        resolve();
+      };
+      video.addEventListener("seeked", done);
+      video.currentTime = Math.max(0, Math.min(video.duration - 0.01, t));
+      setTimeout(done, 3000);
+    });
+  }
+
+  // ---------- Moment picker (action + multi-phone) ----------
+  function openMoment(m) {
+    stopPlayback();
+    st.moment = m;
+    st.views = [];
+    st.crop = null;
+    $("editControls").hidden = true;
+    $("editActions").hidden = true;
+    show("edit");
+    $("editEmpty").hidden = true;
+    $("momentPanel").hidden = false;
+    const r = $("momentRange");
+    if (m.kind === "action") {
+      $("nudges").innerHTML = "";
+      r.min = "0";
+      r.max = String(m.frames.length - 1);
+      r.step = "1";
+      r.value = String(m.frames.length - 1);
+      $("momentTitle").textContent = "Pick the moment (ball off the foot, peak of the jump…)";
+      $("momentUse").textContent = "Make 3D from this moment";
+      $("momentNote").textContent = "One moment, frozen sharp. Depth comes from the scene itself.";
+    } else {
+      r.min = String(m.t0);
+      r.max = String(m.t1);
+      r.step = "0.033";
+      r.value = String((m.t0 + m.t1) / 2);
+      $("momentTitle").textContent = "Pick the moment — every phone jumps to the same instant";
+      $("momentUse").textContent = "Use this moment from every phone";
+      // Fine-tune: if one phone's sound and picture are slightly out, nudge it by whole frames.
+      const box = $("nudges");
+      box.innerHTML = "";
+      m.videos.forEach((_, i) => {
+        if (i === 0) return;
+        const row = document.createElement("div");
+        row.className = "nudge";
+        row.innerHTML = `<span>Phone ${i + 1}</span><button type="button" class="ghost-btn">−1 frame</button><output>0</output><button type="button" class="ghost-btn">+1 frame</button>`;
+        const [minus, plus] = row.querySelectorAll("button");
+        const out = row.querySelector("output");
+        let n = 0;
+        const apply = (d) => {
+          n += d;
+          m.lags[i] -= d / 30;
+          out.textContent = (n > 0 ? "+" : "") + n;
+        };
+        minus.addEventListener("click", () => apply(-1));
+        plus.addEventListener("click", () => apply(1));
+        box.appendChild(row);
+      });
+    }
+    showMoment();
+  }
+
+  let momentBusy = false;
+  async function showMoment() {
+    const m = st.moment;
+    if (!m || momentBusy) return;
+    momentBusy = true;
+    const c = $("preview");
+    let src;
+    if (m.kind === "action") src = m.frames[+$("momentRange").value];
+    else {
+      const v = m.videos[0];
+      await seekTo(v, +$("momentRange").value - m.lags[0]);
+      src = v;
+    }
+    const sw = src.videoWidth || src.width;
+    const sh = src.videoHeight || src.height;
+    const k = Math.min(1, 720 / Math.max(sw, sh));
+    c.width = Math.round(sw * k);
+    c.height = Math.round(sh * k);
+    c.getContext("2d").drawImage(src, 0, 0, c.width, c.height);
+    $("focusDot").style.display = "none";
+    momentBusy = false;
+  }
+  $("momentRange").addEventListener("input", showMoment);
+  const nudge = (dir) => {
+    const r = $("momentRange");
+    r.value = String(Math.min(+r.max, Math.max(+r.min, +r.value + dir * +r.step)));
+    showMoment();
+  };
+  $("momentPrev").addEventListener("click", () => nudge(-1));
+  $("momentNext").addEventListener("click", () => nudge(1));
+
+  $("momentUse").addEventListener("click", async () => {
+    const m = st.moment;
+    if (!m) return;
+    $("momentUse").disabled = true;
+    try {
+      if (m.kind === "action") {
+        const frame = m.frames[+$("momentRange").value];
+        const views = await depthViews(frame);
+        $("momentPanel").hidden = true;
+        await loadFrames(views, true);
+      } else {
+        busy(true, "Grabbing the same instant from every phone…");
+        const t = +$("momentRange").value;
+        const frames = [];
+        for (let i = 0; i < m.videos.length; i++) {
+          const v = m.videos[i];
+          await seekTo(v, t - m.lags[i]);
+          const k = Math.min(1, S.longEdge / Math.max(v.videoWidth, v.videoHeight));
+          const c = document.createElement("canvas");
+          c.width = Math.round(v.videoWidth * k);
+          c.height = Math.round(v.videoHeight * k);
+          c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+          frames.push(c);
+        }
+        // Different phones, different sizes: match everything to the first.
+        const W = frames[0].width;
+        const H = frames[0].height;
+        const same = frames.map((f) => {
+          if (f.width === W && f.height === H) return f;
+          const c = document.createElement("canvas");
+          c.width = W;
+          c.height = H;
+          const s2 = Math.max(W / f.width, H / f.height);
+          c.getContext("2d").drawImage(f, (W - f.width * s2) / 2, (H - f.height * s2) / 2, f.width * s2, f.height * s2);
+          return c;
+        });
+        busy(false);
+        $("momentPanel").hidden = true;
+        await loadFrames(same, true);
+      }
+    } catch (err) {
+      busy(false);
+      toast(err.message || "That moment could not be used.");
+    } finally {
+      $("momentUse").disabled = false;
+    }
+  });
+
+  /** Seven viewpoints from one frame, using depth: people pop out, the ground and sky fall back. */
+  async function depthViews(frame) {
+    busy(true, "Finding the players…");
+    const w = frame.width;
+    const h = frame.height;
+    const ctx = frame.getContext("2d", { willReadFrequently: true });
+    const src = ctx.getImageData(0, 0, w, h).data;
+    let mask = await segmentPeople(frame);
+    let focus = { x: w / 2, y: h / 2 };
+    if (mask) {
+      let sx = 0;
+      let sy = 0;
+      let n = 0;
+      for (let i = 0; i < mask.length; i++) {
+        if (!mask[i]) continue;
+        sx += i % w;
+        sy += (i / w) | 0;
+        n++;
+      }
+      if (n < w * h * 0.002) mask = null;
+      else focus = { x: sx / n, y: sy / n };
+    }
+    busy(true, mask ? "Adding depth around the players…" : "Adding depth…");
+    await nextPaint();
+    const depth = WG.makeDepth(mask, w, h, focus);
+    const fd = depth[Math.round(focus.y) * w + Math.round(focus.x)];
+    const amp = w * 0.045;
+    const N = 7;
+    const out = [];
+    for (let k = 0; k < N; k++) {
+      const shift = amp * ((k / (N - 1)) * 2 - 1);
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      c.getContext("2d").putImageData(new ImageData(WG.depthView(src, w, h, depth, shift, fd), w, h), 0, 0);
+      out.push(c);
+      await sleep(0);
+    }
+    if (!mask) toast("No players found (or offline): depth is estimated from the scene.");
+    busy(false);
+    return out;
+  }
+
+  // On-device AI (MediaPipe DeepLab): which pixels are people (and other objects). Null if unavailable.
+  let segmenter = null;
+  async function segmentPeople(canvas) {
+    try {
+      if (!segmenter) {
+        segmenter = (async () => {
+          const base = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+          const vision = await import(base + "/vision_bundle.mjs");
+          const fileset = await vision.FilesetResolver.forVisionTasks(base + "/wasm");
+          return vision.ImageSegmenter.createFromOptions(fileset, {
+            baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/image_segmenter/deeplab_v3/float32/1/deeplab_v3.tflite" },
+            outputCategoryMask: true,
+            outputConfidenceMasks: false,
+            runningMode: "IMAGE",
+          });
+        })();
+      }
+      const seg = await Promise.race([segmenter, sleep(15000).then(() => null)]);
+      if (!seg) return null;
+      return await new Promise((resolve) => {
+        seg.segment(canvas, (result) => {
+          const m = result && result.categoryMask;
+          if (!m) return resolve(null);
+          const raw = m.getAsUint8Array();
+          const out = new Uint8Array(canvas.width * canvas.height);
+          for (let y = 0; y < canvas.height; y++) {
+            const my = Math.min(m.height - 1, Math.floor((y / canvas.height) * m.height));
+            for (let x = 0; x < canvas.width; x++) {
+              const mx = Math.min(m.width - 1, Math.floor((x / canvas.width) * m.width));
+              out[y * canvas.width + x] = raw[my * m.width + mx] > 0 ? 1 : 0; // 0 = background
+            }
+          }
+          resolve(out);
+        });
+      });
+    } catch {
+      segmenter = null;
+      return null;
+    }
+  }
 
   async function captureSweep() {
     const video = $("video");
@@ -302,6 +729,10 @@
     await nextPaint();
     stopPlayback();
     $("editEmpty").hidden = true;
+    $("momentPanel").hidden = true;
+    $("editControls").hidden = false;
+    $("editActions").hidden = false;
+    st.moment = null;
     st.frames = frames;
     st.small = [];
     st.mid = [];
@@ -1196,5 +1627,5 @@
     navigator.serviceWorker.register("sw.js").catch(() => undefined);
   }
   // Test hook: lets automated checks feed frames without a camera.
-  window.__wg = { loadFrames, state: st };
+  window.__wg = { loadFrames, state: st, openMoment, depthViews, setMode };
 })();
