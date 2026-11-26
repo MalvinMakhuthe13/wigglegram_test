@@ -25,7 +25,8 @@
     uploadKey: "",
     message: "Your wigglegram from tonight ✨",
     frames: 14,
-    sweepSec: 1.4,
+    sweepSec: 1.2,
+    film: false,
     countdown: 2,
     longEdge: 1080,
     clipSec: 4,
@@ -122,9 +123,10 @@
         audio: false,
         video: {
           facingMode: { ideal: st.facing },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 30 },
+          // As sharp as the phone allows; 60 fps keeps sweep blur down where supported.
+          width: { ideal: 3840 },
+          height: { ideal: 2160 },
+          frameRate: { ideal: 60 },
         },
       });
     } catch (err) {
@@ -330,7 +332,9 @@
       }
       st.positions = WG.cumulative(shifts);
       const travel = Math.abs(st.positions[st.positions.length - 1]);
+      const fastest = Math.max(...shifts.map((v) => Math.abs(v)));
       if (travel < 3) toast("The phone barely moved. Slide it further next time for more depth.");
+      else if (fastest > st.small[0].w * 0.12) toast("That sweep was fast — slide a little slower for sharper frames.");
     }
 
     st.focus = { x: W / 2, y: frames[0].height / 2 };
@@ -351,7 +355,11 @@
     align();
   }
 
-  /** Lock every view onto the focus point. */
+  /**
+   * Lock every view onto the focus point. Five small patches on the subject are tracked, and a
+   * rotation + zoom + shift is fitted to them, so a phone that tilts or drifts closer during the
+   * sweep still gives a rock-steady subject. Brightness is evened out between views as well.
+   */
   function align() {
     const W = st.frames[0].width;
     const H = st.frames[0].height;
@@ -359,28 +367,93 @@
     const refM = st.mid[st.ref];
     const sS = refS.w / W;
     const sM = refM.w / W;
-    const patch = 0.26; // of the width
-    st.offsets = st.views.map((i) => {
-      if (i === st.ref) return { dx: 0, dy: 0 };
-      // Coarse: small image, wide search, seeded by the global camera travel.
-      const pw = refS.w * patch;
+    const k = refM.w / refS.w;
+    const R = W * 0.09;
+    const pts = [
+      { x: 0, y: 0 },
+      { x: -R, y: -R },
+      { x: R, y: -R },
+      { x: -R, y: R },
+      { x: R, y: R },
+    ].map((o) => ({ x: clamp(st.focus.x + o.x, W * 0.06, W * 0.94), y: clamp(st.focus.y + o.y, H * 0.06, H * 0.94) }));
+    const pm = refM.w * 0.11;
+    const expRect = { x: st.focus.x * sM - refM.w * 0.12, y: st.focus.y * sM - refM.w * 0.12, w: refM.w * 0.24, h: refM.w * 0.24 };
+    const refMean = WG.meanIn(refM.gray, refM.w, refM.h, expRect) || 1;
+
+    st.transforms = [];
+    st.gains = [];
+    for (const i of st.views) {
+      if (i === st.ref) {
+        st.transforms.push({ a: 1, b: 0, tx: 0, ty: 0 });
+        st.gains.push(1);
+        continue;
+      }
+      // Coarse: whole subject patch on the small image, two starting guesses.
+      const pw = refS.w * 0.26;
       const rectS = { x: st.focus.x * sS - pw / 2, y: st.focus.y * sS - pw / 2, w: pw, h: pw };
-      // Try two starting points and keep the better match: "the subject stayed put" (the
-      // photographer kept it centred) and "the subject moved with the camera".
       const travel = (st.positions[i] - st.positions[st.ref]) || 0;
       let coarse = WG.estimateShift(refS.g, st.small[i].g, refS.w, refS.h, rectS, { dx: 0, dy: 0 }, 22, 1);
       if (Math.abs(travel) > 6) {
         const alt = WG.estimateShift(refS.g, st.small[i].g, refS.w, refS.h, rectS, { dx: travel, dy: 0 }, 22, 1);
         if (alt.cost < coarse.cost) coarse = alt;
       }
-      // Fine: mid image, small search around the coarse answer, sub-pixel.
-      const k = refM.w / refS.w;
-      const pm = refM.w * patch;
-      const rectM = { x: st.focus.x * sM - pm / 2, y: st.focus.y * sM - pm / 2, w: pm, h: pm };
-      const fine = WG.estimateShift(refM.g, st.mid[i].g, refM.w, refM.h, rectM, { dx: coarse.dx * k, dy: coarse.dy * k }, 3, 1);
-      return { dx: fine.dx / sM, dy: fine.dy / sM };
+      // Fine: each patch on the mid image, around the coarse answer.
+      const ps = [];
+      const qs = [];
+      const ws = [];
+      let centre = null;
+      pts.forEach((p, n) => {
+        const cx = p.x * sM;
+        const cy = p.y * sM;
+        const size = n === 0 ? refM.w * 0.2 : pm;
+        const rect = { x: cx - size / 2, y: cy - size / 2, w: size, h: size };
+        // Flat patches (plain skin, a white wall) cannot be matched reliably: leave them out.
+        if (n > 0 && WG.textureIn(refM.g, refM.w, refM.h, rect) < 4) return;
+        const f = WG.estimateShift(refM.g, st.mid[i].g, refM.w, refM.h, rect, { dx: coarse.dx * k, dy: coarse.dy * k }, n === 0 ? 3 : 6, 1);
+        if (!Number.isFinite(f.cost)) return;
+        if (n === 0) centre = f;
+        else if (centre) {
+          // A patch that moved very differently from the centre is background (parallax), not subject.
+          const off = Math.hypot(f.dx - centre.dx, f.dy - centre.dy);
+          if (off > R * sM * 0.15 + 2) return;
+        }
+        ps.push({ x: cx, y: cy });
+        qs.push({ x: cx + f.dx, y: cy + f.dy });
+        ws.push(n === 0 ? 3 : 1);
+      });
+      let T = ps.length >= 3 ? WG.fitSimilarity(ps, qs, ws) : { a: 1, b: 0, tx: (centre ? centre.dx : coarse.dx * k), ty: (centre ? centre.dy : coarse.dy * k) };
+      // Refine: undo the estimated tilt and zoom, measure what is left, correct. Twice.
+      if (ps.length >= 3) {
+        for (let pass = 0; pass < 2; pass++) {
+          const warped = WG.gradient(WG.warpGray(st.mid[i].gray, refM.w, refM.h, T), refM.w, refM.h);
+          const rp = [];
+          const rq = [];
+          const rw = [];
+          ps.forEach((p, n) => {
+            const size = n === 0 ? refM.w * 0.2 : pm;
+            const rect = { x: p.x - size / 2, y: p.y - size / 2, w: size, h: size };
+            const f = WG.estimateShift(refM.g, warped, refM.w, refM.h, rect, { dx: 0, dy: 0 }, 2, 1);
+            if (!Number.isFinite(f.cost)) return;
+            rp.push(p);
+            rq.push({ x: p.x + f.dx, y: p.y + f.dy });
+            rw.push(ws[n]);
+          });
+          if (rp.length < 3) break;
+          T = WG.composeSim(T, WG.fitSimilarity(rp, rq, rw));
+        }
+      }
+      // Mid-image coordinates -> frame coordinates (same rotation/zoom, shift rescaled).
+      st.transforms.push({ a: T.a, b: T.b, tx: T.tx / sM, ty: T.ty / sM });
+      const c = centre || { dx: coarse.dx * k, dy: coarse.dy * k };
+      const m = WG.meanIn(st.mid[i].gray, refM.w, refM.h, { x: expRect.x + c.dx, y: expRect.y + c.dy, w: expRect.w, h: expRect.h });
+      st.gains.push(m > 1 ? clamp(refMean / m, 0.8, 1.25) : 1);
+    }
+    // Kept for diagnostics: where the focus point lands in each view.
+    st.offsets = st.transforms.map((T) => {
+      const q = WG.applySim(T, st.focus);
+      return { dx: q.x - st.focus.x, dy: q.y - st.focus.y };
     });
-    st.baseCrop = WG.commonCrop(st.offsets, W, H);
+    st.baseCrop = WG.commonCropSim(st.transforms, W, H);
     applyAspect();
   }
 
@@ -411,18 +484,76 @@
   }
 
   // ---------- Drawing ----------
-  function drawEntry(ctx, entry, w, h) {
+  const canFilter = (() => {
+    try {
+      const c = document.createElement("canvas").getContext("2d");
+      return !!c && "filter" in c;
+    } catch {
+      return false;
+    }
+  })();
+
+  function drawEntry(ctx, entry, w, h, frameNo) {
     const crop = st.crop;
+    const kk = w / crop.w;
     const draw = (viewIndex, alpha) => {
       const f = st.frames[st.views[viewIndex]];
-      const o = st.offsets[viewIndex];
+      const inv = WG.invertSim(st.transforms[viewIndex]);
+      const gain = st.gains[viewIndex] || 1;
       ctx.globalAlpha = alpha;
-      ctx.drawImage(f, crop.x + o.dx, crop.y + o.dy, crop.w, crop.h, 0, 0, w, h);
+      if (canFilter) ctx.filter = Math.abs(gain - 1) > 0.01 ? `brightness(${gain.toFixed(3)})` : "none";
+      ctx.setTransform(kk * inv.a, kk * inv.b, -kk * inv.b, kk * inv.a, kk * (inv.tx - crop.x), kk * (inv.ty - crop.y));
+      ctx.drawImage(f, 0, 0);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (canFilter) ctx.filter = "none";
     };
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, w, h);
     draw(entry.a, 1);
     if (entry.t > 0) draw(entry.b, entry.t);
     ctx.globalAlpha = 1;
+    if (S.film) drawFilm(ctx, w, h, frameNo == null ? st.step : frameNo);
     drawBranding(ctx, w, h);
+  }
+
+  // Film look: warm tone, soft vignette and moving grain, like a print from an analogue 3D camera.
+  let grainTile = null;
+  function drawFilm(ctx, w, h, n) {
+    if (!grainTile) {
+      grainTile = document.createElement("canvas");
+      grainTile.width = grainTile.height = 256;
+      const g = grainTile.getContext("2d");
+      const img = g.createImageData(256, 256);
+      for (let i = 0; i < img.data.length; i += 4) {
+        const v = 128 + (Math.random() - 0.5) * 120;
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+        img.data[i + 3] = 255;
+      }
+      g.putImageData(img, 0, 0);
+    }
+    ctx.save();
+    ctx.globalCompositeOperation = "soft-light";
+    ctx.fillStyle = "rgba(255,170,90,0.35)";
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalCompositeOperation = "overlay";
+    ctx.globalAlpha = 0.22;
+    const pat = ctx.createPattern(grainTile, "repeat");
+    if (pat) {
+      const ox = (n * 97) % 256;
+      const oy = (n * 57) % 256;
+      ctx.translate(-ox, -oy);
+      ctx.fillStyle = pat;
+      ctx.fillRect(0, 0, w + 256, h + 256);
+      ctx.translate(ox, oy);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "multiply";
+    const v = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.hypot(w, h) * 0.6);
+    v.addColorStop(0, "rgba(255,255,255,1)");
+    v.addColorStop(1, "rgba(60,50,45,1)");
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
   }
 
   function drawBranding(ctx, w, h) {
@@ -484,6 +615,19 @@
   bindRange("speed", (v) => v + " ms", () => startPlayback());
   bindRange("tween", (v) => (v ? "+" + v : "off"), () => st.frames.length && applyAspect());
 
+  const filmBtn = $("filmBtn");
+  const syncFilm = () => {
+    filmBtn.classList.toggle("on", !!S.film);
+    filmBtn.textContent = S.film ? "Film look: on" : "Film look: off";
+  };
+  syncFilm();
+  filmBtn.addEventListener("click", () => {
+    S.film = !S.film;
+    saveSettings();
+    syncFilm();
+    drawCurrent();
+  });
+
   $("aspectSeg").addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;
@@ -539,7 +683,7 @@
     const start = performance.now();
     let i = 0;
     while (performance.now() - start < total) {
-      drawEntry(ctx, st.timeline[i % st.timeline.length], w, h);
+      drawEntry(ctx, st.timeline[i % st.timeline.length], w, h, i);
       i++;
       await sleep(ms);
     }
@@ -570,8 +714,8 @@
     c.width = w;
     c.height = h;
     const ctx = c.getContext("2d");
-    for (const entry of st.timeline) {
-      drawEntry(ctx, entry, w, h);
+    for (const [n, entry] of st.timeline.entries()) {
+      drawEntry(ctx, entry, w, h, n);
       gif.addFrame(ctx, { copy: true, delay: Math.round(stepMs()) });
     }
     return new Promise((resolve, reject) => {

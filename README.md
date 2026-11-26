@@ -10,9 +10,13 @@ A 4-lens camera has a fixed, short gap between lenses and exactly 4 views. Wiggl
 
 - **Shoots a burst of 6–24 frames while you slide the phone** (about a hand-width), so the distance between the first and last view is many times wider than lens spacing. More distance means more parallax, which means more depth.
 - **Measures how far the camera actually moved in each frame** and picks views evenly spaced by *distance*, not time. An uneven hand still gives a smooth turn. Where several frames are close to the right spot, it keeps the sharpest one.
+- **Cancels hand wobble.** Five detail patches on the subject are tracked and a rotation + zoom + shift is fitted and refined twice, so a sweep that tilts a few degrees or drifts closer still gives a subject that holds within about half a pixel (tested: 2.5° tilt and 3% zoom drift → 0.4 px).
+- **Evens out exposure** between frames, so the loop doesn't flicker.
+- **Shoots from the sharpest stream the phone offers** (up to 4K, 60 fps where supported).
 - **Lets you choose 2–10 views** and how much of the sweep to use (the *Depth* slider).
 - **Locks the subject.** Tap a person and every view is aligned on them to sub-pixel accuracy, so they stay still while the world turns around them. It works whether you slide straight or orbit around the subject.
-- **Adds in-between frames** (*Smooth*) for a continuous turn instead of a jumpy flicker.
+- **Crisp frames by default**, like a lens camera. *Smooth* adds blended in-between frames if you prefer a softer turn.
+- **Film look** (optional): warm tone, moving grain and vignette.
 
 ## Event flow
 

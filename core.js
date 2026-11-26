@@ -231,5 +231,122 @@
     return out;
   }
 
-  return { grayFromRGBA, gradient, sharpness, estimateShift, selectViews, commonCrop, fitAspect, timeline, cumulative };
+
+  /**
+   * Least-squares similarity (rotation + uniform scale + translation) taking points ps -> qs:
+   * q = [a -b; b a] p + t. Handles a phone that tilts or drifts closer during the sweep.
+   */
+  function fitSimilarity(ps, qs, weights) {
+    const n = ps.length;
+    if (!n) return { a: 1, b: 0, tx: 0, ty: 0 };
+    let W = 0, px = 0, py = 0, qx = 0, qy = 0;
+    for (let i = 0; i < n; i++) {
+      const w = weights ? weights[i] : 1;
+      W += w; px += w * ps[i].x; py += w * ps[i].y; qx += w * qs[i].x; qy += w * qs[i].y;
+    }
+    px /= W; py /= W; qx /= W; qy /= W;
+    if (n === 1) return { a: 1, b: 0, tx: qx - px, ty: qy - py };
+    let sxx = 0, sab = 0, sba = 0;
+    for (let i = 0; i < n; i++) {
+      const w = weights ? weights[i] : 1;
+      const ux = ps[i].x - px, uy = ps[i].y - py;
+      const vx = qs[i].x - qx, vy = qs[i].y - qy;
+      sxx += w * (ux * ux + uy * uy);
+      sab += w * (ux * vx + uy * vy);
+      sba += w * (ux * vy - uy * vx);
+    }
+    if (sxx < 1e-9) return { a: 1, b: 0, tx: qx - px, ty: qy - py };
+    let a = sab / sxx;
+    let b = sba / sxx;
+    // Keep it physical: a handheld sweep never zooms more than ±12% or tilts past ±10°.
+    const scale = Math.hypot(a, b);
+    const angle = Math.atan2(b, a);
+    const cs = Math.min(1.12, Math.max(0.89, scale));
+    const ca = Math.min(0.175, Math.max(-0.175, angle));
+    a = cs * Math.cos(ca);
+    b = cs * Math.sin(ca);
+    return { a, b, tx: qx - (a * px - b * py), ty: qy - (b * px + a * py) };
+  }
+
+  function applySim(T, p) {
+    return { x: T.a * p.x - T.b * p.y + T.tx, y: T.b * p.x + T.a * p.y + T.ty };
+  }
+
+  function invertSim(T) {
+    const d = T.a * T.a + T.b * T.b;
+    const a = T.a / d;
+    const b = -T.b / d;
+    return { a, b, tx: -(a * T.tx - b * T.ty), ty: -(b * T.tx + a * T.ty) };
+  }
+
+  /**
+   * Largest axis-aligned rectangle (reference coordinates) that every view covers, where view i
+   * maps reference -> frame by T[i]. Conservative: shrinks to the inner bound of each view's quad.
+   */
+  function commonCropSim(transforms, w, h) {
+    let x0 = 0, y0 = 0, x1 = w, y1 = h;
+    for (const T of transforms) {
+      const inv = invertSim(T);
+      const c = [applySim(inv, { x: 0, y: 0 }), applySim(inv, { x: w, y: 0 }), applySim(inv, { x: w, y: h }), applySim(inv, { x: 0, y: h })];
+      x0 = Math.max(x0, c[0].x, c[3].x);
+      x1 = Math.min(x1, c[1].x, c[2].x);
+      y0 = Math.max(y0, c[0].y, c[1].y);
+      y1 = Math.min(y1, c[2].y, c[3].y);
+    }
+    x0 = Math.ceil(x0); y0 = Math.ceil(y0); x1 = Math.floor(x1); y1 = Math.floor(y1);
+    return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+  }
+
+
+  /** Resample `cur` so that out(p) = cur(T(p)) (bilinear). T maps reference -> current. */
+  function warpGray(cur, w, h, T) {
+    const out = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+      let qx = T.a * 0 - T.b * y + T.tx;
+      let qy = T.b * 0 + T.a * y + T.ty;
+      for (let x = 0; x < w; x++, qx += T.a, qy += T.b) {
+        const x0 = Math.floor(qx);
+        const y0 = Math.floor(qy);
+        if (x0 < 0 || y0 < 0 || x0 >= w - 1 || y0 >= h - 1) {
+          out[y * w + x] = 0;
+          continue;
+        }
+        const fx = qx - x0;
+        const fy = qy - y0;
+        const i = y0 * w + x0;
+        out[y * w + x] =
+          cur[i] * (1 - fx) * (1 - fy) + cur[i + 1] * fx * (1 - fy) + cur[i + w] * (1 - fx) * fy + cur[i + w + 1] * fx * fy;
+      }
+    }
+    return out;
+  }
+
+  /** T1 after T2: p -> T1(T2(p)). */
+  function composeSim(T1, T2) {
+    return {
+      a: T1.a * T2.a - T1.b * T2.b,
+      b: T1.b * T2.a + T1.a * T2.b,
+      tx: T1.a * T2.tx - T1.b * T2.ty + T1.tx,
+      ty: T1.b * T2.tx + T1.a * T2.ty + T1.ty,
+    };
+  }
+
+  /** Mean gradient (texture) inside a rect of a gradient image. */
+  function textureIn(g, w, h, rect) {
+    return meanIn(g, w, h, rect);
+  }
+
+  /** Mean of a gray image inside a rect: used to even out exposure between views. */
+  function meanIn(gray, w, h, rect) {
+    let s = 0, n = 0;
+    const x0 = Math.max(0, Math.floor(rect.x)), y0 = Math.max(0, Math.floor(rect.y));
+    const x1 = Math.min(w, Math.floor(rect.x + rect.w)), y1 = Math.min(h, Math.floor(rect.y + rect.h));
+    for (let y = y0; y < y1; y += 2) for (let x = x0; x < x1; x += 2) { s += gray[y * w + x]; n++; }
+    return n ? s / n : 0;
+  }
+
+  return {
+    grayFromRGBA, gradient, sharpness, estimateShift, selectViews, commonCrop, fitAspect, timeline, cumulative,
+    fitSimilarity, applySim, invertSim, commonCropSim, meanIn, warpGray, composeSim, textureIn,
+  };
 });

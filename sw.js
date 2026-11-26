@@ -1,5 +1,5 @@
 // Offline shell: clubs and venues often have no signal.
-const CACHE = "wigglegram-v3";
+const CACHE = "wigglegram-v4";
 const SHELL = ["./", "index.html", "styles.css", "core.js", "app.js", "manifest.webmanifest", "icon.svg"];
 const CDN = ["https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js", "https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js", "https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js"];
 
