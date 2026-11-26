@@ -55,6 +55,7 @@
         <canvas id="preview"></canvas>
         <div class="focus-dot" id="focusDot"></div>
         <div class="busy" id="busy" hidden><span class="spinner"></span><b id="busyText">Working…</b></div>
+        <div class="empty" id="editEmpty"><p>Nothing captured yet.</p><p class="muted">Shoot a sweep on the Capture tab, or import photos.</p></div>
       </div>
       <p class="hint">Tap the person or thing that should stay still. Everything else moves around it.</p>
 
@@ -87,6 +88,8 @@
 
     <!-- DELIVER -->
     <section class="screen" id="screen-deliver">
+      <div class="empty card" id="deliverEmpty"><p>No clip open.</p><p class="muted">Make a clip on the Edit tab, or open one from the Event tab.</p></div>
+      <div id="deliverBody">
       <div class="stage small"><video id="clipVideo" autoplay loop muted playsinline></video><img id="clipImg" alt="" hidden /></div>
 
       <div class="card" id="payCard">
@@ -116,6 +119,7 @@
       <div class="row">
         <button class="ghost-btn" id="saveGifBtn">Also make GIF</button>
         <button class="primary-btn" id="nextBtn">Next guest →</button>
+      </div>
       </div>
     </section>
 

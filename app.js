@@ -87,6 +87,9 @@
     document.querySelectorAll(".screen").forEach((el) => el.classList.toggle("active", el.id === "screen-" + name));
     document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.screen === name));
     if (name === "gallery") renderGallery();
+    $("editEmpty").hidden = st.views.length > 0;
+    $("deliverEmpty").hidden = !!st.clip;
+    $("deliverBody").hidden = !st.clip;
     if (name !== "edit") stopPlayback();
     else if (st.views.length) startPlayback();
   }
@@ -296,6 +299,7 @@
     busy(true, "Finding the depth…");
     await nextPaint();
     stopPlayback();
+    $("editEmpty").hidden = true;
     st.frames = frames;
     st.small = [];
     st.mid = [];
@@ -382,6 +386,7 @@
 
   function applyAspect() {
     st.crop = WG.fitAspect(st.baseCrop, st.aspect, st.focus);
+    $("editEmpty").hidden = true;
     const c = $("preview");
     const s = Math.min(1, 720 / Math.max(st.crop.w, st.crop.h));
     c.width = Math.round(st.crop.w * s);
