@@ -1,50 +1,56 @@
-# Wigglegram Maker
+# Wigglegram — depth moments for events
 
-Create fun 3D-style animated photos (wigglegrams) from two images.
+A phone camera app for events and clubs. Shoot a short sideways sweep, and it turns it into a looping 3D "wiggle" clip with your branding. Then take payment and send the clip to the guest on the spot.
 
-A **wigglegram** rapidly alternates between two photos taken from slightly different angles. This creates a simple but surprisingly effective sense of depth and movement — no 3D glasses required.
+Plain HTML, CSS and JavaScript. No build step, and no server is needed to run it. Install it to the home screen like an app; after the first visit it works offline.
 
-## Features
+## Why it has more depth than a 4-lens camera
 
-- Upload left & right images (or drag & drop)
-- Manual alignment controls (horizontal + vertical offset)
-- Live preview with adjustable speed
-- Download as animated GIF
-- Works entirely in the browser — no uploads, no account needed
-- Clean, modern dark UI
+A 4-lens camera has a fixed, short gap between lenses and exactly 4 views. Wigglegram:
 
-## How to use
+- **Shoots a burst of 6–24 frames while you slide the phone** (about a hand-width), so the distance between the first and last view is many times wider than lens spacing. More distance means more parallax, which means more depth.
+- **Measures how far the camera actually moved in each frame** and picks views evenly spaced by *distance*, not time. An uneven hand still gives a smooth turn. Where several frames are close to the right spot, it keeps the sharpest one.
+- **Lets you choose 2–10 views** and how much of the sweep to use (the *Depth* slider).
+- **Locks the subject.** Tap a person and every view is aligned on them to sub-pixel accuracy, so they stay still while the world turns around them. It works whether you slide straight or orbit around the subject.
+- **Adds in-between frames** (*Smooth*) for a continuous turn instead of a jumpy flicker.
 
-1. Open `index.html` in your browser (or host it)
-2. Upload a **Left** image and a **Right** image  
-   (photos of the same subject taken a few centimeters apart)
-3. Adjust the alignment so the main subject stays still while the background moves
-4. Tweak the speed to your liking
-5. Click **Download GIF**
+## Event flow
 
-### Tips for good wigglegrams
+1. **Capture**: frame the guest, tap the shutter, then slide the phone after the countdown. In dark clubs, use 💡 to turn on the light (Android).
+2. **Edit**: tap the guest's face, then adjust depth, views, speed and the 4:5, 1:1 or 9:16 crop.
+3. **Make clip**: renders an MP4 (iPhone and most Android phones) or a WebM, with your watermark and logo. You can also make a GIF.
+4. **Deliver**: the price shows on screen. The guest pays by QR (your Yoco, PayFast, SnapScan or Zapper link), cash or card, and you tap *Paid*. That unlocks sending.
+   - **Share…**: the phone's share sheet (WhatsApp, AirDrop, Instagram, email).
+   - **WhatsApp**: opens a chat with the guest's number. South African 0-numbers become +27.
+   - **Email**
+   - **QR download**: the guest scans to download the clip themselves.
+   - **Organiser pays** mode skips payment entirely, for when the venue books you.
+5. **Event tab**: every clip, paid or owing, with revenue so far. Export a CSV of sales at the end of the night.
 
-- Keep the camera at the same height
-- Move only sideways between the two shots (not forward/backward)
-- The closer the subject, the stronger the 3D effect
-- Align on the main subject’s eyes or face for portraits
+## Settings
 
-## Running locally
+Everything is on the ⚙️ tab and saved on the phone: event name, watermark, logo, price, payment link, which payment and delivery options to show, frames per sweep, sweep time, countdown, quality and clip length.
 
-Just open `index.html` in any modern browser.  
-No build step or server required.
+## Sending links instead of files (optional)
 
-If you want a local server (recommended for some browsers):
+With an **Upload address** set, WhatsApp, Email and QR download send a link to the clip instead of the file. The app `POST`s `multipart/form-data` with the fields `file`, `id` and `event`, plus `Authorization: Bearer <Upload key>` if a key is set. The address must answer with JSON `{"url": "https://…"}` or with the link as plain text. A Supabase Storage edge function or any small server works.
+
+## Multi-phone rigs and other cameras
+
+**Import** takes 2 or more photos at once, from synced phones on a bar or a multi-lens camera's frames. They are sorted by file name, so name them left to right. The same alignment, crop, branding and selling flow applies. A rig captures everyone at the same instant, which is best for people who are moving.
+
+## Run it
+
+Host the folder on any HTTPS static host (GitHub Pages, Cloudflare Pages, Netlify). Camera access needs HTTPS. Locally:
 
 ```bash
 npx serve .
 ```
 
-## Tech
+## Files
 
-- Pure HTML, CSS & JavaScript
-- [gif.js](https://github.com/jnordberg/gif.js) for GIF export (loaded via CDN)
+- `core.js`: frame selection, alignment, crop and timing. Pure functions; they run in Node for tests.
+- `app.js`: camera, capture, editor, export, payments, delivery and the event log (IndexedDB).
+- `sw.js`, `manifest.webmanifest`, `icon.svg`: offline install.
 
-## License
-
-MIT
+MIT licence.

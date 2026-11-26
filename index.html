@@ -2,87 +2,186 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Wigglegram Maker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d0d12" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Wigglegram — depth moments</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon.svg" />
   <link rel="stylesheet" href="styles.css" />
-  <script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.js"></script>
 </head>
 <body>
   <div class="app">
-    <header>
-      <h1>Wigglegram</h1>
-      <p class="subtitle">Create fun 3D-style animated photos</p>
+    <header class="topbar">
+      <div class="brand"><span class="logo">◐◑</span> <b id="eventTitle">Wigglegram</b></div>
+      <div class="pill" id="todayStats">0 clips · R0</div>
     </header>
 
-    <main>
-      <!-- Upload Section -->
-      <section class="upload-section">
-        <div class="upload-box" id="leftBox">
-          <input type="file" id="leftInput" accept="image/*" hidden />
-          <div class="upload-content" id="leftContent">
-            <div class="upload-icon">📷</div>
-            <p>Left Image</p>
-            <span class="hint">Click or drop</span>
-          </div>
-          <img id="leftPreview" class="preview-img" hidden />
+    <!-- CAPTURE -->
+    <section class="screen active" id="screen-capture">
+      <div class="viewfinder" id="viewfinder">
+        <video id="video" autoplay muted playsinline></video>
+        <div class="guide" id="guide" hidden>
+          <div class="guide-text" id="guideText">Slide the phone slowly →</div>
+          <div class="guide-bar"><i id="guideFill"></i></div>
         </div>
-
-        <div class="upload-box" id="rightBox">
-          <input type="file" id="rightInput" accept="image/*" hidden />
-          <div class="upload-content" id="rightContent">
-            <div class="upload-icon">📷</div>
-            <p>Right Image</p>
-            <span class="hint">Click or drop</span>
-          </div>
-          <img id="rightPreview" class="preview-img" hidden />
+        <div class="countdown" id="countdown" hidden></div>
+        <div class="cam-off" id="camOff">
+          <p>Tap <b>Start camera</b> to begin.</p>
+          <p class="muted">Or import photos from a rig or another camera.</p>
         </div>
-      </section>
-
-      <!-- Alignment Controls -->
-      <section class="controls-section" id="alignSection" hidden>
-        <h2>Alignment</h2>
-        <p class="hint-text">Adjust the right image so the main subject overlaps perfectly</p>
-        
-        <div class="slider-group">
-          <label>Horizontal Offset <span id="offsetXValue">0</span>px</label>
-          <input type="range" id="offsetX" min="-150" max="150" value="0" />
+        <div class="vf-tools">
+          <button class="icon-btn" id="torchBtn" title="Light" hidden>💡</button>
+          <button class="icon-btn" id="flipBtn" title="Switch camera">🔄</button>
         </div>
-        
-        <div class="slider-group">
-          <label>Vertical Offset <span id="offsetYValue">0</span>px</label>
-          <input type="range" id="offsetY" min="-150" max="150" value="0" />
+      </div>
+
+      <div class="capture-bar">
+        <label class="ghost-btn file-btn">
+          Import
+          <input type="file" id="importInput" accept="image/*" multiple hidden />
+        </label>
+        <button class="shutter" id="shutterBtn" aria-label="Capture"><span></span></button>
+        <button class="ghost-btn" id="camBtn">Start camera</button>
+      </div>
+      <p class="hint" id="captureHint">Hold the shutter steady on your subject, then slide the phone sideways about a hand-width while it shoots.</p>
+    </section>
+
+    <!-- EDIT -->
+    <section class="screen" id="screen-edit">
+      <div class="stage">
+        <canvas id="preview"></canvas>
+        <div class="focus-dot" id="focusDot"></div>
+        <div class="busy" id="busy" hidden><span class="spinner"></span><b id="busyText">Working…</b></div>
+      </div>
+      <p class="hint">Tap the person or thing that should stay still. Everything else moves around it.</p>
+
+      <div class="controls">
+        <label>Depth <output id="depthOut"></output>
+          <input type="range" id="depth" min="0.3" max="1" step="0.05" value="0.85" />
+        </label>
+        <label>Views <output id="viewsOut"></output>
+          <input type="range" id="views" min="2" max="10" step="1" value="6" />
+        </label>
+        <label>Speed <output id="speedOut"></output>
+          <input type="range" id="speed" min="40" max="220" step="5" value="90" />
+        </label>
+        <label>Smooth <output id="tweenOut"></output>
+          <input type="range" id="tween" min="0" max="3" step="1" value="1" />
+        </label>
+        <div class="seg" id="aspectSeg">
+          <button data-aspect="0.8" class="on">4:5</button>
+          <button data-aspect="1">1:1</button>
+          <button data-aspect="0.5625">9:16</button>
+          <button data-aspect="0">Full</button>
         </div>
-      </section>
+      </div>
 
-      <!-- Preview Section -->
-      <section class="preview-section" id="previewSection" hidden>
-        <h2>Preview</h2>
-        <div class="canvas-container">
-          <canvas id="wiggleCanvas"></canvas>
+      <div class="row">
+        <button class="ghost-btn" id="retakeBtn">Retake</button>
+        <button class="primary-btn" id="exportBtn">Make clip</button>
+      </div>
+    </section>
+
+    <!-- DELIVER -->
+    <section class="screen" id="screen-deliver">
+      <div class="stage small"><video id="clipVideo" autoplay loop muted playsinline></video><img id="clipImg" alt="" hidden /></div>
+
+      <div class="card" id="payCard">
+        <div class="price-row">
+          <span>Price</span>
+          <b id="priceLabel">R0</b>
         </div>
-
-        <div class="playback-controls">
-          <div class="slider-group">
-            <label>Speed <span id="speedValue">120</span>ms</label>
-            <input type="range" id="speed" min="40" max="400" value="120" />
-          </div>
-
-          <div class="button-row">
-            <button id="playBtn" class="btn primary">Pause</button>
-            <button id="downloadBtn" class="btn secondary">Download GIF</button>
-          </div>
+        <div class="qr-wrap" id="payQrWrap" hidden>
+          <div id="payQr"></div>
+          <p class="muted">Guest scans to pay</p>
         </div>
-      </section>
+        <div class="row wrap" id="payButtons"></div>
+        <p class="status" id="payStatus">Not paid yet</p>
+      </div>
 
-      <!-- Status -->
-      <div id="status" class="status"></div>
-    </main>
+      <div class="card">
+        <label class="field">Guest WhatsApp / email (optional)
+          <input id="guestContact" placeholder="+27 82 123 4567 or name@mail.com" inputmode="email" />
+        </label>
+        <div class="row wrap" id="sendButtons"></div>
+        <div class="qr-wrap" id="dlQrWrap" hidden>
+          <div id="dlQr"></div>
+          <p class="muted">Guest scans to download</p>
+        </div>
+      </div>
 
-    <footer>
-      <p>Made with ❤️ · Open source on <a href="https://github.com/MalvinMakhuthe13/wigglegram_test" target="_blank">GitHub</a></p>
-    </footer>
+      <div class="row">
+        <button class="ghost-btn" id="saveGifBtn">Also make GIF</button>
+        <button class="primary-btn" id="nextBtn">Next guest →</button>
+      </div>
+    </section>
+
+    <!-- GALLERY -->
+    <section class="screen" id="screen-gallery">
+      <div class="totals" id="totals"></div>
+      <div class="row">
+        <button class="ghost-btn" id="csvBtn">Export sales (CSV)</button>
+        <button class="ghost-btn danger" id="clearBtn">Clear event</button>
+      </div>
+      <ul class="gallery" id="gallery"></ul>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="screen" id="screen-settings">
+      <form id="settingsForm" class="settings">
+        <h3>Event</h3>
+        <label class="field">Event name<input name="eventName" placeholder="Saturday at Konka" /></label>
+        <label class="field">Watermark text<input name="watermark" placeholder="@yourbrand · event" /></label>
+        <label class="field">Logo (PNG with transparency)<input type="file" id="logoInput" accept="image/*" /></label>
+        <label class="check"><input type="checkbox" name="showLogo" /> Show logo on clips</label>
+
+        <h3>Selling</h3>
+        <label class="field">Price per clip (R)<input name="price" type="number" min="0" step="1" /></label>
+        <label class="check"><input type="checkbox" name="organiserPays" /> Organiser pays — clips are free for guests</label>
+        <label class="field">Payment link (Yoco, PayFast, SnapScan, Zapper…)<input name="payLink" type="url" placeholder="https://pay.yoco.com/your-shop" /></label>
+        <label class="check"><input type="checkbox" name="allowCash" /> Accept cash</label>
+        <label class="check"><input type="checkbox" name="allowCard" /> Accept card on a speed point</label>
+
+        <h3>Delivery</h3>
+        <label class="check"><input type="checkbox" name="deliverShare" /> Share sheet (WhatsApp, AirDrop, email…)</label>
+        <label class="check"><input type="checkbox" name="deliverWhatsApp" /> WhatsApp to the guest's number</label>
+        <label class="check"><input type="checkbox" name="deliverEmail" /> Email to the guest</label>
+        <label class="check"><input type="checkbox" name="deliverQr" /> QR download (needs an upload address)</label>
+        <label class="field">Upload address<input name="uploadUrl" type="url" placeholder="https://your-server/upload" /></label>
+        <label class="field">Upload key (sent as Authorization header)<input name="uploadKey" type="password" autocomplete="off" /></label>
+        <label class="field">Message sent with the clip<input name="message" placeholder="Your wigglegram from tonight ✨" /></label>
+
+        <h3>Camera</h3>
+        <label class="field">Frames per sweep<input name="frames" type="number" min="6" max="24" /></label>
+        <label class="field">Sweep time (seconds)<input name="sweepSec" type="number" min="0.6" max="3" step="0.1" /></label>
+        <label class="field">Countdown (seconds)<input name="countdown" type="number" min="0" max="5" /></label>
+        <label class="field">Quality
+          <select name="longEdge">
+            <option value="1080">1080 px (fast, small files)</option>
+            <option value="1440">1440 px</option>
+            <option value="1920">1920 px (best)</option>
+          </select>
+        </label>
+        <label class="field">Clip length (seconds)<input name="clipSec" type="number" min="2" max="10" step="0.5" /></label>
+        <p class="muted">Saved on this phone. Works offline after the first visit.</p>
+      </form>
+    </section>
+
+    <nav class="tabs">
+      <button data-screen="capture" class="on">📷<span>Capture</span></button>
+      <button data-screen="edit">✨<span>Edit</span></button>
+      <button data-screen="deliver">💸<span>Deliver</span></button>
+      <button data-screen="gallery">🗂️<span>Event</span></button>
+      <button data-screen="settings">⚙️<span>Settings</span></button>
+    </nav>
   </div>
 
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="core.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
