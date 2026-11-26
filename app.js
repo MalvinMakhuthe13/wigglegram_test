@@ -956,8 +956,10 @@
     const { rows, revenue } = await updateStats();
     const paid = rows.filter((r) => r.status === "paid").length;
     const unpaid = rows.filter((r) => r.status === "unpaid").length;
+    const free = rows.filter((r) => r.status === "free").length;
+    const extra = [unpaid ? `${unpaid} owing` : "", free ? `${free} free` : ""].filter(Boolean).join(" · ");
     $("totals").innerHTML = `<div><b>${rows.length}</b><span>clips</span></div><div><b>${paid}</b><span>paid${
-      unpaid ? ` · ${unpaid} owing` : ""
+      extra ? ` · ${extra}` : ""
     }</span></div><div><b>${rand(revenue)}</b><span>taken</span></div>`;
     const list = $("gallery");
     list.innerHTML = "";
